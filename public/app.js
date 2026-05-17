@@ -1,11 +1,22 @@
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
 const state = {
   meta: null,
   mode: 'blind',
   ddragonVersion: null,
   ddragonByKey: {},
-  lastRecommendations: []
+  lastRecommendations: [],
+  supabase: null,
+  session: null,
+  user: null,
+  username: null,
+  remotePools: {},
+  feedbackCounts: {}
 };
 
+const SUPABASE_URL = 'https://vwcmdowgzptxdhmhahhz.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ3Y21kb3dnenB0eGRobWhhaGh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMTY4NDEsImV4cCI6MjA5NDU5Mjg0MX0.BHb3CCg6sZv_K31VFpbiap0PrxkBTyMsrgWsYAtynfg';
+const AUTH_EMAIL_DOMAIN = 'lol-pick-helper.app';
 const API_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 const META_API_CACHE_TTL_MS = 1000 * 60 * 60;
 
@@ -51,6 +62,16 @@ const els = {
   tierSummary: document.querySelector('#tierSummary'),
   poolInput: document.querySelector('#poolInput'),
   poolPreview: document.querySelector('#poolPreview'),
+  authLoggedOut: document.querySelector('#authLoggedOut'),
+  authLoggedIn: document.querySelector('#authLoggedIn'),
+  authMessage: document.querySelector('#authMessage'),
+  usernameInput: document.querySelector('#usernameInput'),
+  passwordInput: document.querySelector('#passwordInput'),
+  loginBtn: document.querySelector('#loginBtn'),
+  signupBtn: document.querySelector('#signupBtn'),
+  logoutBtn: document.querySelector('#logoutBtn'),
+  importLocalBtn: document.querySelector('#importLocalBtn'),
+  currentUsername: document.querySelector('#currentUsername'),
   loadPoolBtn: document.querySelector('#loadPoolBtn'),
   savePoolBtn: document.querySelector('#savePoolBtn'),
   clearPoolBtn: document.querySelector('#clearPoolBtn'),
@@ -91,6 +112,38 @@ function ownTierKey() {
 
 function feedbackKey() {
   return 'lolps.feedback.v1';
+}
+
+function isLoggedIn() {
+  return Boolean(state.user);
+}
+
+function usernameToEmail(username) {
+  return `${username}@${AUTH_EMAIL_DOMAIN}`;
+}
+
+function validateCredentials() {
+  const username = els.usernameInput.value.trim();
+  const password = els.passwordInput.value;
+
+  if (!/^[a-z0-9]+$/.test(username)) {
+    throw new Error('아이디는 영어 소문자와 숫자만 사용할 수 있습니다.');
+  }
+  if (password.length < 10 || password.length > 20) {
+    throw new Error('비밀번호는 10~20자로 입력해 주세요.');
+  }
+  return { username, password };
+}
+
+function setAuthMessage(text, kind = '') {
+  els.authMessage.textContent = text;
+  els.authMessage.className = `helper-text auth-message ${kind}`.trim();
+}
+
+function renderAuth() {
+  els.authLoggedOut.classList.toggle('hidden', isLoggedIn());
+  els.authLoggedIn.classList.toggle('hidden', !isLoggedIn());
+  els.currentUsername.textContent = state.username || '-';
 }
 
 function apiCacheKey(path) {
@@ -136,7 +189,8 @@ function writeFeedback(feedback) {
 }
 
 function personalAdjustment(championId) {
-  const item = readFeedback()[championId] || { wins: 0, losses: 0 };
+  const source = isLoggedIn() ? state.feedbackCounts : readFeedback();
+  const item = source[championId] || { wins: 0, losses: 0 };
   return Math.max(-12, Math.min(12, (item.wins - item.losses) * 2));
 }
 
@@ -145,22 +199,50 @@ function activeLolpsTier() {
   return lolpsTiers[bucket];
 }
 
-function syncTierFilter() {
+async function saveUserSettings() {
+  if (!isLoggedIn()) return;
+  await state.supabase.from('user_settings').upsert({
+    user_id: state.user.id,
+    default_lane: els.laneSelect.value,
+    tier: els.ownTierSelect.value,
+    updated_at: new Date().toISOString()
+  });
+}
+
+function syncTierFilter(persist = true) {
   const tier = activeLolpsTier();
   els.lolpsTierSelect.value = String(tier.id);
   els.tierSummary.textContent = `${tier.label} 데이터`;
   els.tierSummary.title = tier.description;
-  localStorage.setItem(ownTierKey(), els.ownTierSelect.value);
+  if (isLoggedIn()) {
+    if (persist) saveUserSettings();
+  } else {
+    localStorage.setItem(ownTierKey(), els.ownTierSelect.value);
+  }
 }
 
-function savePool() {
-  localStorage.setItem(poolKey(), els.poolInput.value);
+async function savePool() {
+  if (isLoggedIn()) {
+    const champions = parsePoolText(els.poolInput.value);
+    const { error } = await state.supabase.from('champion_pools').upsert({
+      user_id: state.user.id,
+      lane: els.laneSelect.value,
+      champions,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id,lane' });
+    if (error) throw error;
+    state.remotePools[els.laneSelect.value] = champions.join('\n');
+  } else {
+    localStorage.setItem(poolKey(), els.poolInput.value);
+  }
   renderPoolPreview();
   setStatus('챔프폭 저장됨', 'ok');
 }
 
 function loadPool() {
-  els.poolInput.value = localStorage.getItem(poolKey()) || '';
+  els.poolInput.value = isLoggedIn()
+    ? state.remotePools[els.laneSelect.value] || ''
+    : localStorage.getItem(poolKey()) || '';
   renderPoolPreview();
   setStatus('저장값 불러옴', 'ok');
 }
@@ -175,6 +257,160 @@ function clearPoolInput() {
   els.poolInput.value = '';
   renderPoolPreview();
   setStatus('입력칸 비움');
+}
+
+async function loadAccountData() {
+  if (!isLoggedIn()) {
+    state.username = null;
+    state.remotePools = {};
+    state.feedbackCounts = {};
+    renderAuth();
+    return;
+  }
+
+  const fallbackUsername = state.user.email?.split('@')[0] || 'user';
+  const profileResult = await state.supabase
+    .from('profiles')
+    .select('username')
+    .eq('id', state.user.id)
+    .maybeSingle();
+
+  if (!profileResult.data) {
+    await state.supabase.from('profiles').upsert({
+      id: state.user.id,
+      username: fallbackUsername,
+      updated_at: new Date().toISOString()
+    });
+  }
+  state.username = profileResult.data?.username || fallbackUsername;
+
+  const settingsResult = await state.supabase
+    .from('user_settings')
+    .select('default_lane,tier')
+    .eq('user_id', state.user.id)
+    .maybeSingle();
+
+  if (settingsResult.data) {
+    els.ownTierSelect.value = settingsResult.data.tier || els.ownTierSelect.value;
+    els.laneSelect.value = settingsResult.data.default_lane || els.laneSelect.value;
+    syncTierFilter(false);
+  }
+
+  const poolsResult = await state.supabase
+    .from('champion_pools')
+    .select('lane,champions')
+    .eq('user_id', state.user.id);
+
+  state.remotePools = Object.fromEntries(
+    (poolsResult.data || []).map((pool) => [pool.lane, (pool.champions || []).join('\n')])
+  );
+
+  const feedbackResult = await state.supabase
+    .from('match_feedback')
+    .select('champion_id,result')
+    .eq('user_id', state.user.id);
+
+  state.feedbackCounts = {};
+  for (const item of feedbackResult.data || []) {
+    const key = String(item.champion_id);
+    state.feedbackCounts[key] ||= { wins: 0, losses: 0 };
+    if (item.result === 'win') state.feedbackCounts[key].wins += 1;
+    if (item.result === 'loss') state.feedbackCounts[key].losses += 1;
+  }
+
+  renderAuth();
+  loadPool();
+}
+
+async function initAuth() {
+  state.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const { data } = await state.supabase.auth.getSession();
+  state.session = data.session;
+  state.user = data.session?.user || null;
+  await loadAccountData();
+  setAuthMessage(isLoggedIn() ? '계정 저장소와 연결되었습니다.' : '로그인하면 챔프폭과 승패 반영이 계정별로 저장됩니다.', isLoggedIn() ? 'ok' : '');
+
+  state.supabase.auth.onAuthStateChange(async (_event, session) => {
+    state.session = session;
+    state.user = session?.user || null;
+    await loadAccountData();
+  });
+}
+
+async function signUp() {
+  try {
+    const { username, password } = validateCredentials();
+    const { data, error } = await state.supabase.auth.signUp({
+      email: usernameToEmail(username),
+      password
+    });
+    if (error) throw error;
+    if (!data.session) throw new Error('이메일 인증이 켜져 있으면 로그인할 수 없습니다. Supabase Email confirmation을 꺼 주세요.');
+
+    const { error: profileError } = await state.supabase.from('profiles').upsert({
+      id: data.user.id,
+      username,
+      updated_at: new Date().toISOString()
+    });
+    if (profileError) throw profileError;
+
+    setAuthMessage('회원가입 완료. 계정 저장소를 불러왔습니다.', 'ok');
+    els.passwordInput.value = '';
+    state.session = data.session;
+    state.user = data.user;
+    await loadAccountData();
+  } catch (error) {
+    setAuthMessage(error.message, 'bad');
+  }
+}
+
+async function login() {
+  try {
+    const { username, password } = validateCredentials();
+    const { data, error } = await state.supabase.auth.signInWithPassword({
+      email: usernameToEmail(username),
+      password
+    });
+    if (error) throw error;
+    els.passwordInput.value = '';
+    state.session = data.session;
+    state.user = data.user;
+    await loadAccountData();
+    setAuthMessage('로그인되었습니다.', 'ok');
+  } catch (error) {
+    setAuthMessage(error.message, 'bad');
+  }
+}
+
+async function logout() {
+  await state.supabase.auth.signOut();
+  state.session = null;
+  state.user = null;
+  await loadAccountData();
+  loadPool();
+  setAuthMessage('로그아웃되었습니다. 현재는 브라우저 로컬 저장소를 사용합니다.');
+}
+
+async function importLocalPools() {
+  if (!isLoggedIn()) return;
+  try {
+    for (const lane of lanes) {
+      const stored = localStorage.getItem(poolKey(lane.key));
+      const champions = parsePoolText(stored);
+      if (!champions.length) continue;
+      await state.supabase.from('champion_pools').upsert({
+        user_id: state.user.id,
+        lane: lane.key,
+        champions,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id,lane' });
+      state.remotePools[lane.key] = champions.join('\n');
+    }
+    loadPool();
+    setAuthMessage('로컬 챔프폭을 계정 저장소로 가져왔습니다.', 'ok');
+  } catch (error) {
+    setAuthMessage(error.message, 'bad');
+  }
 }
 
 function championById(id) {
@@ -292,12 +528,24 @@ function setupControls() {
     });
   });
 
-  els.laneSelect.addEventListener('change', loadPool);
+  els.laneSelect.addEventListener('change', () => {
+    loadPool();
+    saveUserSettings();
+  });
   els.ownTierSelect.addEventListener('change', syncTierFilter);
   els.poolInput.addEventListener('input', renderPoolPreview);
   els.loadPoolBtn.addEventListener('click', loadPool);
-  els.savePoolBtn.addEventListener('click', savePool);
+  els.savePoolBtn.addEventListener('click', () => {
+    savePool().catch((error) => setStatus(error.message, 'bad'));
+  });
   els.clearPoolBtn.addEventListener('click', clearPoolInput);
+  els.loginBtn.addEventListener('click', login);
+  els.signupBtn.addEventListener('click', signUp);
+  els.logoutBtn.addEventListener('click', logout);
+  els.importLocalBtn.addEventListener('click', importLocalPools);
+  els.passwordInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') login();
+  });
   els.recommendBtn.addEventListener('click', recommend);
 }
 
@@ -652,7 +900,8 @@ function renderCard(card) {
       : card.category === 'avoid'
         ? 'bad'
         : 'warn';
-  const feedback = readFeedback()[champion.id] || { wins: 0, losses: 0 };
+  const feedbackSource = isLoggedIn() ? state.feedbackCounts : readFeedback();
+  const feedback = feedbackSource[champion.id] || { wins: 0, losses: 0 };
   const metrics = card.riskMetrics
     ? `<div class="risk-panel">
         <span>카운터 위험도</span>
@@ -698,18 +947,37 @@ function renderCard(card) {
   `;
 }
 
-function recordFeedback(championId, result) {
-  const feedback = readFeedback();
-  const item = feedback[championId] || { wins: 0, losses: 0 };
-  if (result === 'win') item.wins += 1;
-  if (result === 'loss') item.losses += 1;
-  feedback[championId] = item;
-  writeFeedback(feedback);
+async function recordFeedback(championId, result) {
+  if (isLoggedIn()) {
+    const { error } = await state.supabase.from('match_feedback').insert({
+      user_id: state.user.id,
+      lane: els.laneSelect.value,
+      champion_id: Number(championId),
+      enemy_champion_id: resolveChampion(els.enemyInput.value.trim())?.id || null,
+      result
+    });
+    if (error) {
+      setStatus(error.message, 'bad');
+      return;
+    }
+    const item = state.feedbackCounts[championId] || { wins: 0, losses: 0 };
+    if (result === 'win') item.wins += 1;
+    if (result === 'loss') item.losses += 1;
+    state.feedbackCounts[championId] = item;
+  } else {
+    const feedback = readFeedback();
+    const item = feedback[championId] || { wins: 0, losses: 0 };
+    if (result === 'win') item.wins += 1;
+    if (result === 'loss') item.losses += 1;
+    feedback[championId] = item;
+    writeFeedback(feedback);
+  }
   renderResults(
     document.querySelector('.results h2')?.textContent || '추천 결과',
     state.lastRecommendations,
     document.querySelector('.ghost-link[href*="lol.ps"]')?.href
   );
+  setStatus('승패 반영됨', 'ok');
 }
 
 async function init() {
@@ -718,6 +986,7 @@ async function init() {
     const [meta] = await Promise.all([api('/api/meta'), loadDdragon()]);
     state.meta = meta;
     setupControls();
+    await initAuth();
     loadPool();
     renderPoolPreview();
     setStatus('준비 완료', 'ok');

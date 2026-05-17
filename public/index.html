@@ -21,6 +21,40 @@
         </div>
       </header>
 
+      <section class="auth-card">
+        <div class="auth-state" id="authLoggedOut">
+          <div>
+            <span class="kicker">Account</span>
+            <h2>계정 로그인</h2>
+          </div>
+          <div class="auth-fields">
+            <div class="field">
+              <label for="usernameInput">아이디</label>
+              <input id="usernameInput" autocomplete="username" placeholder="영어 소문자와 숫자" />
+            </div>
+            <div class="field">
+              <label for="passwordInput">비밀번호</label>
+              <input id="passwordInput" type="password" autocomplete="current-password" placeholder="10~20자" />
+            </div>
+            <div class="auth-actions">
+              <button id="loginBtn" class="button secondary">로그인</button>
+              <button id="signupBtn" class="button ghost">회원가입</button>
+            </div>
+          </div>
+        </div>
+        <div class="auth-state hidden" id="authLoggedIn">
+          <div>
+            <span class="kicker">Account</span>
+            <h2><span id="currentUsername">-</span> 계정</h2>
+          </div>
+          <div class="auth-actions">
+            <button id="importLocalBtn" class="button ghost">로컬 챔프폭 가져오기</button>
+            <button id="logoutBtn" class="button secondary">로그아웃</button>
+          </div>
+        </div>
+        <p class="helper-text" id="authMessage">로그인하면 챔프폭과 승패 반영이 계정별로 저장됩니다.</p>
+      </section>
+
       <section class="control-card">
         <div class="field">
           <label for="laneSelect">라인</label>

@@ -103,6 +103,14 @@ h2 {
   line-height: 1.6;
 }
 
+.auth-message.ok {
+  color: #86efac;
+}
+
+.auth-message.bad {
+  color: #fca5a5;
+}
+
 .header-stack {
   display: grid;
   justify-items: end;
@@ -159,11 +167,39 @@ h2 {
 }
 
 .control-card,
+.auth-card,
 .card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: rgba(15, 15, 17, 0.92);
   box-shadow: var(--shadow);
+}
+
+.auth-card {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 16px;
+}
+
+.auth-state {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.auth-fields {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(160px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .control-card {
@@ -575,8 +611,10 @@ textarea:focus {
   }
 
   .app-header,
+  .auth-state,
   .card-header {
     flex-direction: column;
+    align-items: stretch;
   }
 
   .header-stack {
@@ -584,6 +622,7 @@ textarea:focus {
   }
 
   .control-card,
+  .auth-fields,
   .workspace-grid {
     grid-template-columns: 1fr;
   }
