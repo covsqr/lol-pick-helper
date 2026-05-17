@@ -7,8 +7,8 @@ const state = {
   ddragonByKey: {},
   lastRecommendations: [],
   supabase: null,
-  session: null,
-  user: null,
+  token: null,
+  accountId: null,
   username: null,
   remotePools: {},
   feedbackCounts: {}
@@ -16,7 +16,6 @@ const state = {
 
 const SUPABASE_URL = 'https://vwcmdowgzptxdhmhahhz.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ3Y21kb3dnenB0eGRobWhhaGh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMTY4NDEsImV4cCI6MjA5NDU5Mjg0MX0.BHb3CCg6sZv_K31VFpbiap0PrxkBTyMsrgWsYAtynfg';
-const AUTH_EMAIL_DOMAIN = 'gmail.com';
 const API_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 const META_API_CACHE_TTL_MS = 1000 * 60 * 60;
 
@@ -114,12 +113,12 @@ function feedbackKey() {
   return 'lolps.feedback.v1';
 }
 
-function isLoggedIn() {
-  return Boolean(state.user);
+function sessionKey() {
+  return 'lolps.accountSession.v1';
 }
 
-function usernameToEmail(username) {
-  return `${username}@${AUTH_EMAIL_DOMAIN}`;
+function isLoggedIn() {
+  return Boolean(state.token && state.accountId);
 }
 
 function validateCredentials() {
@@ -201,11 +200,10 @@ function activeLolpsTier() {
 
 async function saveUserSettings() {
   if (!isLoggedIn()) return;
-  await state.supabase.from('user_settings').upsert({
-    user_id: state.user.id,
-    default_lane: els.laneSelect.value,
-    tier: els.ownTierSelect.value,
-    updated_at: new Date().toISOString()
+  await state.supabase.rpc('app_save_settings', {
+    p_token: state.token,
+    p_default_lane: els.laneSelect.value,
+    p_tier: els.ownTierSelect.value
   });
 }
 
@@ -224,12 +222,11 @@ function syncTierFilter(persist = true) {
 async function savePool() {
   if (isLoggedIn()) {
     const champions = parsePoolText(els.poolInput.value);
-    const { error } = await state.supabase.from('champion_pools').upsert({
-      user_id: state.user.id,
-      lane: els.laneSelect.value,
-      champions,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'user_id,lane' });
+    const { error } = await state.supabase.rpc('app_save_pool', {
+      p_token: state.token,
+      p_lane: els.laneSelect.value,
+      p_champions: champions
+    });
     if (error) throw error;
     state.remotePools[els.laneSelect.value] = champions.join('\n');
   } else {
@@ -262,61 +259,38 @@ function clearPoolInput() {
 async function loadAccountData() {
   if (!isLoggedIn()) {
     state.username = null;
+    state.accountId = null;
     state.remotePools = {};
     state.feedbackCounts = {};
     renderAuth();
     return;
   }
 
-  const fallbackUsername = state.user.email?.split('@')[0] || 'user';
-  const profileResult = await state.supabase
-    .from('profiles')
-    .select('username')
-    .eq('id', state.user.id)
-    .maybeSingle();
-
-  if (!profileResult.data) {
-    await state.supabase.from('profiles').upsert({
-      id: state.user.id,
-      username: fallbackUsername,
-      updated_at: new Date().toISOString()
-    });
+  const { data, error } = await state.supabase.rpc('app_get_state', {
+    p_token: state.token
+  });
+  if (error) {
+    localStorage.removeItem(sessionKey());
+    state.token = null;
+    state.accountId = null;
+    state.username = null;
+    state.remotePools = {};
+    state.feedbackCounts = {};
+    renderAuth();
+    throw error;
   }
-  state.username = profileResult.data?.username || fallbackUsername;
 
-  const settingsResult = await state.supabase
-    .from('user_settings')
-    .select('default_lane,tier')
-    .eq('user_id', state.user.id)
-    .maybeSingle();
-
-  if (settingsResult.data) {
-    els.ownTierSelect.value = settingsResult.data.tier || els.ownTierSelect.value;
-    els.laneSelect.value = settingsResult.data.default_lane || els.laneSelect.value;
+  const settings = data?.settings || {};
+  if (settings.tier || settings.default_lane) {
+    els.ownTierSelect.value = settings.tier || els.ownTierSelect.value;
+    els.laneSelect.value = settings.default_lane || els.laneSelect.value;
     syncTierFilter(false);
   }
 
-  const poolsResult = await state.supabase
-    .from('champion_pools')
-    .select('lane,champions')
-    .eq('user_id', state.user.id);
-
   state.remotePools = Object.fromEntries(
-    (poolsResult.data || []).map((pool) => [pool.lane, (pool.champions || []).join('\n')])
+    Object.entries(data?.pools || {}).map(([lane, champions]) => [lane, (champions || []).join('\n')])
   );
-
-  const feedbackResult = await state.supabase
-    .from('match_feedback')
-    .select('champion_id,result')
-    .eq('user_id', state.user.id);
-
-  state.feedbackCounts = {};
-  for (const item of feedbackResult.data || []) {
-    const key = String(item.champion_id);
-    state.feedbackCounts[key] ||= { wins: 0, losses: 0 };
-    if (item.result === 'win') state.feedbackCounts[key].wins += 1;
-    if (item.result === 'loss') state.feedbackCounts[key].losses += 1;
-  }
+  state.feedbackCounts = data?.feedback || {};
 
   renderAuth();
   loadPool();
@@ -324,41 +298,40 @@ async function loadAccountData() {
 
 async function initAuth() {
   state.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  const { data } = await state.supabase.auth.getSession();
-  state.session = data.session;
-  state.user = data.session?.user || null;
-  await loadAccountData();
-  setAuthMessage(isLoggedIn() ? '계정 저장소와 연결되었습니다.' : '로그인하면 챔프폭과 승패 반영이 계정별로 저장됩니다.', isLoggedIn() ? 'ok' : '');
-
-  state.supabase.auth.onAuthStateChange(async (_event, session) => {
-    state.session = session;
-    state.user = session?.user || null;
+  try {
+    const saved = JSON.parse(localStorage.getItem(sessionKey()) || 'null');
+    if (saved?.token && saved?.accountId && saved?.username) {
+      state.token = saved.token;
+      state.accountId = saved.accountId;
+      state.username = saved.username;
+    }
     await loadAccountData();
-  });
+    setAuthMessage(isLoggedIn() ? '계정 저장소와 연결되었습니다.' : '로그인하면 챔프폭과 승패 반영이 계정별로 저장됩니다.', isLoggedIn() ? 'ok' : '');
+  } catch (error) {
+    setAuthMessage(error.message, 'bad');
+  }
 }
 
 async function signUp() {
   try {
     const { username, password } = validateCredentials();
-    const { data, error } = await state.supabase.auth.signUp({
-      email: usernameToEmail(username),
-      password
+    const { data, error } = await state.supabase.rpc('app_signup', {
+      p_username: username,
+      p_password: password
     });
     if (error) throw error;
-    if (!data.session) throw new Error('이메일 인증이 켜져 있으면 로그인할 수 없습니다. Supabase Email confirmation을 꺼 주세요.');
 
-    const { error: profileError } = await state.supabase.from('profiles').upsert({
-      id: data.user.id,
-      username,
-      updated_at: new Date().toISOString()
-    });
-    if (profileError) throw profileError;
-
-    setAuthMessage('회원가입 완료. 계정 저장소를 불러왔습니다.', 'ok');
+    state.token = data.token;
+    state.accountId = data.account_id;
+    state.username = data.username;
+    localStorage.setItem(sessionKey(), JSON.stringify({
+      token: state.token,
+      accountId: state.accountId,
+      username: state.username
+    }));
     els.passwordInput.value = '';
-    state.session = data.session;
-    state.user = data.user;
     await loadAccountData();
+    setAuthMessage('회원가입 완료. 계정 저장소를 불러왔습니다.', 'ok');
   } catch (error) {
     setAuthMessage(error.message, 'bad');
   }
@@ -367,14 +340,20 @@ async function signUp() {
 async function login() {
   try {
     const { username, password } = validateCredentials();
-    const { data, error } = await state.supabase.auth.signInWithPassword({
-      email: usernameToEmail(username),
-      password
+    const { data, error } = await state.supabase.rpc('app_login', {
+      p_username: username,
+      p_password: password
     });
     if (error) throw error;
+    state.token = data.token;
+    state.accountId = data.account_id;
+    state.username = data.username;
+    localStorage.setItem(sessionKey(), JSON.stringify({
+      token: state.token,
+      accountId: state.accountId,
+      username: state.username
+    }));
     els.passwordInput.value = '';
-    state.session = data.session;
-    state.user = data.user;
     await loadAccountData();
     setAuthMessage('로그인되었습니다.', 'ok');
   } catch (error) {
@@ -383,9 +362,13 @@ async function login() {
 }
 
 async function logout() {
-  await state.supabase.auth.signOut();
-  state.session = null;
-  state.user = null;
+  if (state.token) {
+    await state.supabase.rpc('app_logout', { p_token: state.token });
+  }
+  localStorage.removeItem(sessionKey());
+  state.token = null;
+  state.accountId = null;
+  state.username = null;
   await loadAccountData();
   loadPool();
   setAuthMessage('로그아웃되었습니다. 현재는 브라우저 로컬 저장소를 사용합니다.');
@@ -398,12 +381,12 @@ async function importLocalPools() {
       const stored = localStorage.getItem(poolKey(lane.key));
       const champions = parsePoolText(stored);
       if (!champions.length) continue;
-      await state.supabase.from('champion_pools').upsert({
-        user_id: state.user.id,
-        lane: lane.key,
-        champions,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id,lane' });
+      const { error } = await state.supabase.rpc('app_save_pool', {
+        p_token: state.token,
+        p_lane: lane.key,
+        p_champions: champions
+      });
+      if (error) throw error;
       state.remotePools[lane.key] = champions.join('\n');
     }
     loadPool();
@@ -949,12 +932,12 @@ function renderCard(card) {
 
 async function recordFeedback(championId, result) {
   if (isLoggedIn()) {
-    const { error } = await state.supabase.from('match_feedback').insert({
-      user_id: state.user.id,
-      lane: els.laneSelect.value,
-      champion_id: Number(championId),
-      enemy_champion_id: resolveChampion(els.enemyInput.value.trim())?.id || null,
-      result
+    const { error } = await state.supabase.rpc('app_add_feedback', {
+      p_token: state.token,
+      p_lane: els.laneSelect.value,
+      p_champion_id: Number(championId),
+      p_enemy_champion_id: resolveChampion(els.enemyInput.value.trim())?.id || null,
+      p_result: result
     });
     if (error) {
       setStatus(error.message, 'bad');
