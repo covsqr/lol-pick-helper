@@ -16,7 +16,7 @@ const state = {
 
 const SUPABASE_URL = 'https://vwcmdowgzptxdhmhahhz.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ3Y21kb3dnenB0eGRobWhhaGh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMTY4NDEsImV4cCI6MjA5NDU5Mjg0MX0.BHb3CCg6sZv_K31VFpbiap0PrxkBTyMsrgWsYAtynfg';
-const AUTH_EMAIL_DOMAIN = 'lol-pick-helper.app';
+const AUTH_EMAIL_DOMAIN = 'example.com';
 const API_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 const META_API_CACHE_TTL_MS = 1000 * 60 * 60;
 
