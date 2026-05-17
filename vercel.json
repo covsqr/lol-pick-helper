@@ -23,12 +23,12 @@
       "dest": "/api/matchup.js"
     },
     {
-      "src": "/favicon.svg",
-      "dest": "/public/favicon.svg"
+      "src": "/favicon.png",
+      "dest": "/public/favicon.png"
     },
     {
       "src": "/favicon.ico",
-      "dest": "/public/favicon.svg"
+      "dest": "/public/favicon.png"
     },
     {
       "src": "/",
