@@ -1,4 +1,4 @@
-import { getChampionData } from '../server.js';
+import { getChampionData } from '../lib/lolps.js';
 
 export default async function handler(req, res) {
   try {

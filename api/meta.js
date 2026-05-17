@@ -1,4 +1,4 @@
-import { DEFAULT_TIER, REGION_KR, getMeta } from '../server.js';
+import { DEFAULT_TIER, REGION_KR, getMeta } from '../lib/lolps.js';
 
 export default async function handler(req, res) {
   try {

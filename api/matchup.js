@@ -1,4 +1,4 @@
-import { getMatchupData } from '../server.js';
+import { getMatchupData } from '../lib/lolps.js';
 
 export default async function handler(req, res) {
   try {
