@@ -1,0 +1,20 @@
+{
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/api/meta",
+      "destination": "/api/meta.js"
+    },
+    {
+      "source": "/api/champion",
+      "destination": "/api/champion.js"
+    },
+    {
+      "source": "/api/matchup",
+      "destination": "/api/matchup.js"
+    }
+  ]
+}
