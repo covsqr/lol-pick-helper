@@ -4,4 +4,4 @@
 - 챔프폭 설정 가능
 - 선픽/후픽 추천
 
-https://lol-pick-helper.onrender.com/
+https://lol-pick-helper.vercel.app/
