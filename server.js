@@ -438,6 +438,17 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`LoL.PS pick helper running at http://localhost:${PORT}`);
-});
+if (!process.env.VERCEL) {
+  server.listen(PORT, () => {
+    console.log(`LoL.PS pick helper running at http://localhost:${PORT}`);
+  });
+}
+
+export {
+  DEFAULT_TIER,
+  LANE_IDS,
+  REGION_KR,
+  getChampionData,
+  getMatchupData,
+  getMeta
+};

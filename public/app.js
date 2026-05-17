@@ -6,6 +6,9 @@ const state = {
   lastRecommendations: []
 };
 
+const API_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
+const META_API_CACHE_TTL_MS = 1000 * 60 * 60;
+
 const lanes = [
   { key: 'top', label: '탑' },
   { key: 'jungle', label: '정글' },
@@ -88,6 +91,36 @@ function ownTierKey() {
 
 function feedbackKey() {
   return 'lolps.feedback.v1';
+}
+
+function apiCacheKey(path) {
+  return `lolps.apiCache.${path}`;
+}
+
+function apiCacheTtl(path) {
+  return path.startsWith('/api/meta') ? META_API_CACHE_TTL_MS : API_CACHE_TTL_MS;
+}
+
+function readApiCache(path) {
+  try {
+    const cached = JSON.parse(localStorage.getItem(apiCacheKey(path)) || 'null');
+    if (!cached) return null;
+    if (Date.now() - cached.time > apiCacheTtl(path)) {
+      localStorage.removeItem(apiCacheKey(path));
+      return null;
+    }
+    return cached.value;
+  } catch {
+    return null;
+  }
+}
+
+function writeApiCache(path, value) {
+  try {
+    localStorage.setItem(apiCacheKey(path), JSON.stringify({ time: Date.now(), value }));
+  } catch {
+    // Storage can be full or disabled; the app still works without client cache.
+  }
 }
 
 function readFeedback() {
@@ -186,6 +219,9 @@ function renderPoolPreview() {
 }
 
 async function api(path, timeoutMs = 15000) {
+  const cached = readApiCache(path);
+  if (cached) return cached;
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -193,6 +229,7 @@ async function api(path, timeoutMs = 15000) {
     const response = await fetch(path, { signal: controller.signal });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || '요청에 실패했습니다.');
+    writeApiCache(path, body);
     return body;
   } catch (error) {
     if (error.name === 'AbortError') {
