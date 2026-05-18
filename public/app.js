@@ -78,12 +78,25 @@ const els = {
   enemyInput: document.querySelector('#enemyInput'),
   championList: document.querySelector('#championList'),
   counterControls: document.querySelector('#counterControls'),
-  results: document.querySelector('#results')
+  results: document.querySelector('#results'),
+  toast: document.querySelector('#toast')
 };
+
+let toastTimer = null;
 
 function setStatus(text, kind = '') {
   els.status.textContent = text;
   els.status.className = `status ${kind}`.trim();
+}
+
+function showToast(text, kind = 'ok') {
+  if (!els.toast) return;
+  window.clearTimeout(toastTimer);
+  els.toast.textContent = text;
+  els.toast.className = `toast ${kind}`.trim();
+  toastTimer = window.setTimeout(() => {
+    els.toast.classList.add('hidden');
+  }, 2400);
 }
 
 function normalizeName(value) {
@@ -234,26 +247,30 @@ async function savePool() {
   }
   renderPoolPreview();
   setStatus('챔프폭 저장됨', 'ok');
+  showToast('챔프폭이 저장되었습니다.', 'ok');
 }
 
-function loadPool() {
+function loadPool({ notify = false } = {}) {
   els.poolInput.value = isLoggedIn()
     ? state.remotePools[els.laneSelect.value] || ''
     : localStorage.getItem(poolKey()) || '';
   renderPoolPreview();
   setStatus('저장값 불러옴', 'ok');
+  if (notify) showToast('저장된 챔프폭을 불러왔습니다.', 'ok');
 }
 
 function applySamplePool(sampleKey) {
   els.poolInput.value = samples[sampleKey].join('\n');
   renderPoolPreview();
   setStatus('예시 불러옴');
+  showToast('예시 챔프폭을 불러왔습니다.', 'ok');
 }
 
 function clearPoolInput() {
   els.poolInput.value = '';
   renderPoolPreview();
   setStatus('입력칸 비움');
+  showToast('입력칸을 비웠습니다.', 'warn');
 }
 
 async function loadAccountData() {
@@ -332,8 +349,10 @@ async function signUp() {
     els.passwordInput.value = '';
     await loadAccountData();
     setAuthMessage('회원가입 완료. 계정 저장소를 불러왔습니다.', 'ok');
+    showToast('회원가입이 완료되었습니다.', 'ok');
   } catch (error) {
     setAuthMessage(error.message, 'bad');
+    showToast(error.message, 'bad');
   }
 }
 
@@ -356,8 +375,10 @@ async function login() {
     els.passwordInput.value = '';
     await loadAccountData();
     setAuthMessage('로그인되었습니다.', 'ok');
+    showToast('로그인되었습니다.', 'ok');
   } catch (error) {
     setAuthMessage(error.message, 'bad');
+    showToast(error.message, 'bad');
   }
 }
 
@@ -372,6 +393,7 @@ async function logout() {
   await loadAccountData();
   loadPool();
   setAuthMessage('로그아웃되었습니다. 현재는 브라우저 로컬 저장소를 사용합니다.');
+  showToast('로그아웃되었습니다.', 'ok');
 }
 
 async function importLocalPools() {
@@ -391,8 +413,10 @@ async function importLocalPools() {
     }
     loadPool();
     setAuthMessage('로컬 챔프폭을 계정 저장소로 가져왔습니다.', 'ok');
+    showToast('로컬 챔프폭을 계정 저장소로 가져왔습니다.', 'ok');
   } catch (error) {
     setAuthMessage(error.message, 'bad');
+    showToast(error.message, 'bad');
   }
 }
 
@@ -517,9 +541,12 @@ function setupControls() {
   });
   els.ownTierSelect.addEventListener('change', syncTierFilter);
   els.poolInput.addEventListener('input', renderPoolPreview);
-  els.loadPoolBtn.addEventListener('click', loadPool);
+  els.loadPoolBtn.addEventListener('click', () => loadPool({ notify: true }));
   els.savePoolBtn.addEventListener('click', () => {
-    savePool().catch((error) => setStatus(error.message, 'bad'));
+    savePool().catch((error) => {
+      setStatus(error.message, 'bad');
+      showToast(error.message, 'bad');
+    });
   });
   els.clearPoolBtn.addEventListener('click', clearPoolInput);
   els.loginBtn.addEventListener('click', login);
@@ -941,6 +968,7 @@ async function recordFeedback(championId, result) {
     });
     if (error) {
       setStatus(error.message, 'bad');
+      showToast(error.message, 'bad');
       return;
     }
     const item = state.feedbackCounts[championId] || { wins: 0, losses: 0 };
@@ -961,6 +989,7 @@ async function recordFeedback(championId, result) {
     document.querySelector('.ghost-link[href*="lol.ps"]')?.href
   );
   setStatus('승패 반영됨', 'ok');
+  showToast(result === 'win' ? '승리 반영이 저장되었습니다.' : '패배 반영이 저장되었습니다.', 'ok');
 }
 
 async function init() {
