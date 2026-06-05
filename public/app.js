@@ -726,10 +726,16 @@ function failedTableCounterResult(poolChampion, enemyName, error) {
 }
 
 async function recommendCounter() {
-  const pool = currentPoolChampions();
+  let pool = currentPoolChampions();
   const enemyName = els.enemyInput.value.trim();
   if (!pool.length) throw new Error('현재 라인의 챔피언 풀을 먼저 입력해 주세요.');
   if (!enemyName) throw new Error('상대 챔피언을 입력해 주세요.');
+
+  const selectedEnemy = resolveChampion(enemyName);
+  if (selectedEnemy) {
+    pool = pool.filter((item) => item.champion.id !== selectedEnemy.id);
+  }
+  if (!pool.length) throw new Error('상대와 같은 챔피언은 후픽 후보에서 제외됩니다.');
 
   let enemyData;
   try {
