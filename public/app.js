@@ -788,11 +788,32 @@ function formatPercent(value) {
   return `${Number(value || 0).toFixed(2)}%`;
 }
 
-function counterRisk(data, pickRates = {}) {
-  return data.hard.reduce((sum, item) => {
+function counterSeverity(winRate) {
+  const value = Number(winRate);
+  if (!Number.isFinite(value)) return 1;
+  const deficit = Math.max(0, 50 - value);
+  return 1 + deficit / 10;
+}
+
+function riskCounterItems(data, pickRates = {}) {
+  return data.hard.map((item) => {
     const pickRate = Number(item.pickRate ?? pickRates[item.id] ?? 0);
-    return sum + pickRate;
-  }, 0);
+    const severity = counterSeverity(item.winRate);
+    return {
+      ...item,
+      pickRate,
+      severity,
+      riskContribution: pickRate * severity
+    };
+  });
+}
+
+function counterRisk(data, pickRates = {}) {
+  return riskCounterItems(data, pickRates).reduce((sum, item) => sum + item.riskContribution, 0);
+}
+
+function baseCounterRisk(data, pickRates = {}) {
+  return riskCounterItems(data, pickRates).reduce((sum, item) => sum + item.pickRate, 0);
 }
 
 function blindCategory(risk) {
@@ -819,17 +840,14 @@ async function recommendBlind() {
   const cards = poolData
     .map((data) => {
       const risk = counterRisk(data, pickRates);
+      const baseRisk = baseCounterRisk(data, pickRates);
       const adjust = personalAdjustment(data.champion.id);
       const score = Math.max(0, Math.min(100, 100 - risk + adjust));
-      const riskCounters = data.hard
-        .map((item) => ({
-          ...item,
-          pickRate: Number(item.pickRate ?? pickRates[item.id] ?? 0)
-        }))
-        .sort((a, b) => b.pickRate - a.pickRate);
+      const riskCounters = riskCounterItems(data, pickRates)
+        .sort((a, b) => b.riskContribution - a.riskContribution);
       const topRiskCounters = riskCounters
         .slice(0, 6)
-        .map((item) => `${item.nameKr} ${formatPercent(item.pickRate)}`)
+        .map((item) => `${item.nameKr} ${formatPercent(item.pickRate)} x${item.severity.toFixed(1)}`)
         .join(', ');
       return {
         champion: data.champion,
@@ -840,11 +858,12 @@ async function recommendBlind() {
         sourceUrl: data.sourceUrl,
         riskMetrics: {
           risk,
+          baseRisk,
           hardCount: data.hard.length,
           pickRate: data.summary?.pickRate,
           count: data.summary?.count
         },
-        reason: `하드 카운터 ${data.hard.length}명의 해당 라인 픽률을 합산한 위험도는 ${formatPercent(risk)}입니다. 위험 기여가 큰 카운터: ${topRiskCounters || '없음'}.`
+        reason: `하드 카운터 ${data.hard.length}명의 픽률 합 ${formatPercent(baseRisk)}에 불리한 정도를 곱해 가중 위험도 ${formatPercent(risk)}로 계산했습니다. 위험 기여가 큰 카운터: ${topRiskCounters || '없음'}.`
       };
     })
     .sort((a, b) => a.risk - b.risk || b.score - a.score)
@@ -920,13 +939,13 @@ function renderCard(card) {
   const feedback = feedbackSource[champion.id] || { wins: 0, losses: 0 };
   const metrics = card.riskMetrics
     ? `<div class="risk-panel">
-        <span>카운터 위험도</span>
+        <span>가중 카운터 위험도</span>
         <strong>${formatPercent(card.riskMetrics.risk)}</strong>
-        <small>낮을수록 선픽 안정성이 높습니다.</small>
+        <small>카운터 픽률에 불리한 정도를 곱합니다.</small>
       </div>
       <div class="metric-row compact">
         <div class="metric"><span>카운터</span><strong>${card.riskMetrics.hardCount}</strong></div>
-        <div class="metric"><span>픽률</span><strong>${formatPercent(card.riskMetrics.pickRate)}</strong></div>
+        <div class="metric"><span>픽률 합</span><strong>${formatPercent(card.riskMetrics.baseRisk)}</strong></div>
         <div class="metric"><span>표본</span><strong>${card.riskMetrics.count ?? '-'}</strong></div>
       </div>`
     : card.metricItems
