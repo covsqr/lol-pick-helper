@@ -2,6 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { syncRiotAccount } from './lib/riot.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(__dirname, 'public');
@@ -40,6 +41,13 @@ function json(res, status, body) {
     'cache-control': 'no-store'
   });
   res.end(payload);
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString('utf8');
+  return raw ? JSON.parse(raw) : {};
 }
 
 function normalizeName(value) {
@@ -425,6 +433,23 @@ const server = http.createServer(async (req, res) => {
         region: url.searchParams.get('region'),
         tier: url.searchParams.get('tier'),
         version: url.searchParams.get('version') || 'latest'
+      });
+      json(res, 200, data);
+      return;
+    }
+
+    if (url.pathname === '/api/riot-connect') {
+      if (req.method !== 'POST') {
+        json(res, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const body = await readJsonBody(req);
+      const data = await syncRiotAccount({
+        token: body.token,
+        gameName: body.gameName,
+        tagLine: body.tagLine,
+        platform: body.platform || 'kr',
+        count: body.count || 30
       });
       json(res, 200, data);
       return;

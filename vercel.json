@@ -23,6 +23,10 @@
       "dest": "/api/matchup.js"
     },
     {
+      "src": "/api/riot-connect",
+      "dest": "/api/riot-connect.js"
+    },
+    {
       "src": "/favicon.png",
       "dest": "/public/favicon.png"
     },

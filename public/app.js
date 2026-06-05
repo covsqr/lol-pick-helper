@@ -11,7 +11,10 @@ const state = {
   accountId: null,
   username: null,
   remotePools: {},
-  feedbackCounts: {}
+  feedbackCounts: {},
+  riotAccount: null,
+  riotChampionStats: {},
+  riotMatchupStats: {}
 };
 
 const SUPABASE_URL = 'https://vwcmdowgzptxdhmhahhz.supabase.co';
@@ -71,6 +74,13 @@ const els = {
   logoutBtn: document.querySelector('#logoutBtn'),
   importLocalBtn: document.querySelector('#importLocalBtn'),
   currentUsername: document.querySelector('#currentUsername'),
+  riotGameNameInput: document.querySelector('#riotGameNameInput'),
+  riotTagLineInput: document.querySelector('#riotTagLineInput'),
+  riotPlatformSelect: document.querySelector('#riotPlatformSelect'),
+  riotMatchCountSelect: document.querySelector('#riotMatchCountSelect'),
+  riotSyncBtn: document.querySelector('#riotSyncBtn'),
+  riotSummary: document.querySelector('#riotSummary'),
+  riotMessage: document.querySelector('#riotMessage'),
   loadPoolBtn: document.querySelector('#loadPoolBtn'),
   savePoolBtn: document.querySelector('#savePoolBtn'),
   clearPoolBtn: document.querySelector('#clearPoolBtn'),
@@ -152,6 +162,11 @@ function setAuthMessage(text, kind = '') {
   els.authMessage.className = `helper-text auth-message ${kind}`.trim();
 }
 
+function setRiotMessage(text, kind = '') {
+  els.riotMessage.textContent = text;
+  els.riotMessage.className = `helper-text auth-message ${kind}`.trim();
+}
+
 function renderAuth() {
   els.authLoggedOut.classList.toggle('hidden', isLoggedIn());
   els.authLoggedIn.classList.toggle('hidden', !isLoggedIn());
@@ -200,10 +215,104 @@ function writeFeedback(feedback) {
   localStorage.setItem(feedbackKey(), JSON.stringify(feedback));
 }
 
-function personalAdjustment(championId) {
+function riotQueueLabel(queueGroup) {
+  return {
+    solo_ranked: '솔랭',
+    flex_ranked: '자랭',
+    normal: '일겜'
+  }[queueGroup] || queueGroup;
+}
+
+function riotQueueWeight(queueGroup) {
+  return {
+    solo_ranked: 1.2,
+    flex_ranked: 1.0,
+    normal: 0.9
+  }[queueGroup] || 0.5;
+}
+
+function statWinRate(stat) {
+  const games = Number(stat?.games || 0);
+  if (!games) return 0.5;
+  return (Number(stat.wins || 0) + 3) / (games + 6);
+}
+
+function statAdjustment(stat, scale, confidenceGames) {
+  const games = Number(stat?.games || 0);
+  if (!games) return 0;
+  const confidence = Math.min(1, games / confidenceGames);
+  return (statWinRate(stat) - 0.5) * scale * riotQueueWeight(stat.queue_group) * confidence;
+}
+
+function statKey(...parts) {
+  return parts.join(':');
+}
+
+function buildRiotStatMaps(championStats = [], matchupStats = []) {
+  state.riotChampionStats = {};
+  state.riotMatchupStats = {};
+
+  for (const stat of championStats) {
+    const key = statKey(stat.lane, stat.champion_id);
+    state.riotChampionStats[key] ||= [];
+    state.riotChampionStats[key].push(stat);
+  }
+
+  for (const stat of matchupStats) {
+    const key = statKey(stat.lane, stat.my_champion_id, stat.enemy_champion_id);
+    state.riotMatchupStats[key] ||= [];
+    state.riotMatchupStats[key].push(stat);
+  }
+}
+
+function riotAdjustment(championId, enemyChampionId = null) {
+  const lane = els.laneSelect.value;
+  const championRows = state.riotChampionStats[statKey(lane, championId)] || [];
+  const matchupRows = enemyChampionId
+    ? state.riotMatchupStats[statKey(lane, championId, enemyChampionId)] || []
+    : [];
+  const championAdjust = championRows.reduce((sum, stat) => sum + statAdjustment(stat, 50, 8), 0);
+  const matchupAdjust = matchupRows.reduce((sum, stat) => sum + statAdjustment(stat, 30, 5), 0);
+  return Math.max(-10, Math.min(10, championAdjust + matchupAdjust));
+}
+
+function formatSigned(value) {
+  const number = Number(value || 0);
+  return `${number >= 0 ? '+' : ''}${number.toFixed(1)}`;
+}
+
+function formatStatRecord(stat) {
+  return `${riotQueueLabel(stat.queue_group)} ${stat.wins}승 ${stat.losses}패`;
+}
+
+function riotPersonalSummary(championId, enemyChampionId = null) {
+  const lane = els.laneSelect.value;
+  const championRows = state.riotChampionStats[statKey(lane, championId)] || [];
+  const matchupRows = enemyChampionId
+    ? state.riotMatchupStats[statKey(lane, championId, enemyChampionId)] || []
+    : [];
+  if (!championRows.length && !matchupRows.length) return '';
+
+  const adjust = riotAdjustment(championId, enemyChampionId);
+  const championText = championRows
+    .sort((a, b) => riotQueueWeight(b.queue_group) - riotQueueWeight(a.queue_group))
+    .slice(0, 2)
+    .map(formatStatRecord)
+    .join(', ');
+  const matchupText = matchupRows.length
+    ? `매치업 ${matchupRows.map(formatStatRecord).join(', ')}`
+    : '';
+  return [`내 전적 보정 ${formatSigned(adjust)}`, championText, matchupText].filter(Boolean).join(' · ');
+}
+
+function manualAdjustment(championId) {
   const source = isLoggedIn() ? state.feedbackCounts : readFeedback();
   const item = source[championId] || { wins: 0, losses: 0 };
   return Math.max(-12, Math.min(12, (item.wins - item.losses) * 2));
+}
+
+function personalAdjustment(championId, enemyChampionId = null) {
+  return Math.max(-16, Math.min(16, manualAdjustment(championId) + riotAdjustment(championId, enemyChampionId)));
 }
 
 function activeLolpsTier() {
@@ -279,6 +388,9 @@ async function loadAccountData() {
     state.accountId = null;
     state.remotePools = {};
     state.feedbackCounts = {};
+    state.riotAccount = null;
+    buildRiotStatMaps();
+    renderRiotState();
     renderAuth();
     return;
   }
@@ -293,6 +405,9 @@ async function loadAccountData() {
     state.username = null;
     state.remotePools = {};
     state.feedbackCounts = {};
+    state.riotAccount = null;
+    buildRiotStatMaps();
+    renderRiotState();
     renderAuth();
     throw error;
   }
@@ -311,6 +426,7 @@ async function loadAccountData() {
 
   renderAuth();
   loadPool();
+  await loadRiotState();
 }
 
 async function initAuth() {
@@ -417,6 +533,91 @@ async function importLocalPools() {
   } catch (error) {
     setAuthMessage(error.message, 'bad');
     showToast(error.message, 'bad');
+  }
+}
+
+function renderRiotState() {
+  if (!isLoggedIn()) {
+    els.riotSummary.textContent = '로그인 필요';
+    setRiotMessage('로그인 후 Riot ID를 연결하면 솔랭/일반 전적이 개인 보정치로 반영됩니다.');
+    return;
+  }
+
+  if (!state.riotAccount) {
+    els.riotSummary.textContent = '미연결';
+    setRiotMessage('Riot ID를 입력하고 전적 동기화를 누르세요.');
+    return;
+  }
+
+  els.riotGameNameInput.value = state.riotAccount.game_name || '';
+  els.riotTagLineInput.value = state.riotAccount.tag_line || '';
+  els.riotPlatformSelect.value = state.riotAccount.platform || 'kr';
+  const championRows = Object.values(state.riotChampionStats).flat();
+  const games = championRows.reduce((sum, stat) => sum + Number(stat.games || 0), 0);
+  els.riotSummary.textContent = `${state.riotAccount.game_name}#${state.riotAccount.tag_line}`;
+  setRiotMessage(`전적 보정 활성화됨. 집계된 라인별 챔피언 기록 ${games}게임을 추천 점수에 보정치로 반영합니다.`, 'ok');
+}
+
+async function loadRiotState() {
+  if (!isLoggedIn()) {
+    state.riotAccount = null;
+    buildRiotStatMaps();
+    renderRiotState();
+    return;
+  }
+
+  try {
+    const { data, error } = await state.supabase.rpc('app_riot_get_state', {
+      p_token: state.token
+    });
+    if (error) throw error;
+    state.riotAccount = data?.account || null;
+    buildRiotStatMaps(data?.champion_stats || [], data?.matchup_stats || []);
+    renderRiotState();
+  } catch (error) {
+    state.riotAccount = null;
+    buildRiotStatMaps();
+    els.riotSummary.textContent = '대기';
+    setRiotMessage(`Riot 저장 RPC가 아직 준비되지 않았습니다. Supabase SQL을 추가로 실행해야 합니다.`, 'bad');
+  }
+}
+
+async function syncRiotHistory() {
+  if (!isLoggedIn()) throw new Error('로그인 후 Riot 전적을 동기화할 수 있습니다.');
+  const gameName = els.riotGameNameInput.value.trim();
+  const tagLine = els.riotTagLineInput.value.trim();
+  if (!gameName || !tagLine) throw new Error('Riot ID와 태그를 입력해 주세요.');
+
+  els.riotSyncBtn.disabled = true;
+  setRiotMessage('Riot API에서 최근 전적을 분석하는 중입니다.');
+  try {
+    const response = await fetch('/api/riot-connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: state.token,
+        gameName,
+        tagLine,
+        platform: els.riotPlatformSelect.value,
+        count: Number(els.riotMatchCountSelect.value)
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Riot 전적 동기화에 실패했습니다.');
+
+    state.riotAccount = data.account || null;
+    buildRiotStatMaps(data.champion_stats || [], data.matchup_stats || []);
+    renderRiotState();
+    if (state.lastRecommendations.length) {
+      await recommend();
+    }
+    const persistNote = data.persisted ? '' : ` 저장은 실패했습니다: ${data.persistError}`;
+    showToast(`최근 ${data.analyzed}게임 전적을 반영했습니다.${persistNote}`, data.persisted ? 'ok' : 'warn');
+  } catch (error) {
+    setRiotMessage(error.message, 'bad');
+    showToast(error.message, 'bad');
+  } finally {
+    els.riotSyncBtn.disabled = false;
   }
 }
 
@@ -553,6 +754,12 @@ function setupControls() {
   els.signupBtn.addEventListener('click', signUp);
   els.logoutBtn.addEventListener('click', logout);
   els.importLocalBtn.addEventListener('click', importLocalPools);
+  els.riotSyncBtn.addEventListener('click', () => {
+    syncRiotHistory().catch((error) => {
+      setRiotMessage(error.message, 'bad');
+      showToast(error.message, 'bad');
+    });
+  });
   els.passwordInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') login();
   });
@@ -589,12 +796,13 @@ function currentPoolChampions() {
 
 function scoreTableCounter(enemyData, poolChampion) {
   const matchup = enemyData.matchups?.find((item) => item.id === poolChampion.id);
-  const adjust = personalAdjustment(poolChampion.id);
   const enemy = enemyData.champion;
+  const adjust = personalAdjustment(poolChampion.id, enemy?.id);
 
   if (!matchup) {
     return {
       champion: poolChampion,
+      enemyChampionId: enemy?.id,
       category: 'neutral',
       score: 45 + adjust,
       label: '데이터 없음',
@@ -619,6 +827,7 @@ function scoreTableCounter(enemyData, poolChampion) {
   if (enemyWinRate < 50) {
     return {
       champion: poolChampion,
+      enemyChampionId: enemy?.id,
       category: 'best',
       score: Math.min(100, 70 + delta * 2 + sampleBoost + adjust),
       label: '추천',
@@ -630,6 +839,7 @@ function scoreTableCounter(enemyData, poolChampion) {
   if (enemyWinRate > 50) {
     return {
       champion: poolChampion,
+      enemyChampionId: enemy?.id,
       category: 'avoid',
       score: Math.max(0, 30 - Math.abs(delta) * 2 + adjust),
       label: '피하기',
@@ -640,6 +850,7 @@ function scoreTableCounter(enemyData, poolChampion) {
 
   return {
     champion: poolChampion,
+    enemyChampionId: enemy?.id,
     category: 'neutral',
     score: 50 + adjust,
     label: '중립',
@@ -652,11 +863,12 @@ function scorePairCounter(matchup) {
   const stats = matchup.stats;
   const pick = matchup.pick;
   const enemy = matchup.enemy;
-  const adjust = personalAdjustment(pick.id);
+  const adjust = personalAdjustment(pick.id, enemy?.id);
 
   if (!stats || !stats.count) {
     return {
       champion: pick,
+      enemyChampionId: enemy?.id,
       category: 'neutral',
       score: 45 + adjust,
       label: '데이터 없음',
@@ -681,6 +893,7 @@ function scorePairCounter(matchup) {
   if (enemyWinRate < 50) {
     return {
       champion: pick,
+      enemyChampionId: enemy?.id,
       category: 'best',
       score: Math.min(100, 68 + delta * 2 + sampleBoost + adjust),
       label: '추천',
@@ -692,6 +905,7 @@ function scorePairCounter(matchup) {
   if (enemyWinRate > 50) {
     return {
       champion: pick,
+      enemyChampionId: enemy?.id,
       category: 'avoid',
       score: Math.max(0, 30 - Math.abs(delta) * 2 + adjust),
       label: '피하기',
@@ -702,6 +916,7 @@ function scorePairCounter(matchup) {
 
   return {
     champion: pick,
+    enemyChampionId: enemy?.id,
     category: 'neutral',
     score: 50 + adjust,
     label: '중립',
@@ -842,6 +1057,7 @@ async function recommendBlind() {
       const risk = counterRisk(data, pickRates);
       const baseRisk = baseCounterRisk(data, pickRates);
       const adjust = personalAdjustment(data.champion.id);
+      const effectiveRisk = Math.max(0, risk - adjust);
       const score = Math.max(0, Math.min(100, 100 - risk + adjust));
       const riskCounters = riskCounterItems(data, pickRates)
         .sort((a, b) => b.riskContribution - a.riskContribution);
@@ -854,6 +1070,7 @@ async function recommendBlind() {
         category: blindCategory(risk),
         score,
         risk,
+        effectiveRisk,
         label: blindLabel(risk),
         sourceUrl: data.sourceUrl,
         riskMetrics: {
@@ -866,7 +1083,7 @@ async function recommendBlind() {
         reason: `하드 카운터 ${data.hard.length}명의 픽률 합 ${formatPercent(baseRisk)}에 불리한 정도를 곱해 가중 위험도 ${formatPercent(risk)}로 계산했습니다. 위험 기여가 큰 카운터: ${topRiskCounters || '없음'}.`
       };
     })
-    .sort((a, b) => a.risk - b.risk || b.score - a.score)
+    .sort((a, b) => a.effectiveRisk - b.effectiveRisk || a.risk - b.risk)
     .map((card, index) => ({
       ...card,
       category: index === 0 ? 'best' : card.category,
@@ -937,6 +1154,7 @@ function renderCard(card) {
         : 'warn';
   const feedbackSource = isLoggedIn() ? state.feedbackCounts : readFeedback();
   const feedback = feedbackSource[champion.id] || { wins: 0, losses: 0 };
+  const personalNote = riotPersonalSummary(champion.id, card.enemyChampionId);
   const metrics = card.riskMetrics
     ? `<div class="risk-panel">
         <span>가중 카운터 위험도</span>
@@ -974,6 +1192,7 @@ function renderCard(card) {
       </div>
       ${metrics}
       <p class="reason">${card.reason}</p>
+      ${personalNote ? `<p class="personal-note">${personalNote}</p>` : ''}
       <div class="feedback-row">
         <button class="button subtle win" data-feedback="win" data-champion-id="${champion.id}">승리 반영</button>
         <button class="button subtle loss" data-feedback="loss" data-champion-id="${champion.id}">패배 반영</button>

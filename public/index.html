@@ -55,6 +55,47 @@
         <p class="helper-text" id="authMessage">로그인하면 챔프폭과 승패 반영이 계정별로 저장됩니다.</p>
       </section>
 
+      <section class="riot-card">
+        <div class="card-header">
+          <div>
+            <span class="kicker">Riot Match History</span>
+            <h2>내 전적 보정</h2>
+          </div>
+          <div class="result-actions">
+            <span class="pill" id="riotSummary">미연결</span>
+          </div>
+        </div>
+        <div class="riot-fields">
+          <div class="field">
+            <label for="riotGameNameInput">Riot ID</label>
+            <input id="riotGameNameInput" autocomplete="off" placeholder="예: Hide on Bush" />
+          </div>
+          <div class="field short-field">
+            <label for="riotTagLineInput">태그</label>
+            <input id="riotTagLineInput" autocomplete="off" placeholder="KR1" />
+          </div>
+          <div class="field short-field">
+            <label for="riotPlatformSelect">서버</label>
+            <select id="riotPlatformSelect">
+              <option value="kr">KR</option>
+              <option value="jp1">JP</option>
+              <option value="na1">NA</option>
+              <option value="euw1">EUW</option>
+            </select>
+          </div>
+          <div class="field short-field">
+            <label for="riotMatchCountSelect">최근 게임</label>
+            <select id="riotMatchCountSelect">
+              <option value="30">30게임</option>
+              <option value="50">50게임</option>
+              <option value="80">80게임</option>
+            </select>
+          </div>
+          <button id="riotSyncBtn" class="button secondary">전적 동기화</button>
+        </div>
+        <p class="helper-text" id="riotMessage">로그인 후 Riot ID를 연결하면 솔랭/일반 전적이 개인 보정치로 반영됩니다.</p>
+      </section>
+
       <section class="control-card">
         <div class="field">
           <label for="laneSelect">라인</label>
