@@ -612,7 +612,7 @@ function scoreTableCounter(enemyData, poolChampion) {
   const sampleBoost = Math.min(10, Math.log10(Number(matchup.count || 0) + 1) * 4);
   const metricItems = [
     { label: '상대 승률', value: formatPercent(enemyWinRate) },
-    { label: '상대 픽률', value: formatPercent(enemyData.summary?.pickRate) },
+    { label: '픽률', value: formatPercent(matchup.pickRate) },
     { label: '표본', value: matchup.count ?? '-' }
   ];
 
