@@ -595,7 +595,6 @@ async function syncRiotHistory() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        token: state.token,
         gameName,
         tagLine,
         platform: els.riotPlatformSelect.value,
@@ -605,14 +604,20 @@ async function syncRiotHistory() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || 'Riot 전적 동기화에 실패했습니다.');
 
-    state.riotAccount = data.account || null;
-    buildRiotStatMaps(data.champion_stats || [], data.matchup_stats || []);
+    const { data: saved, error } = await state.supabase.rpc('app_riot_save_sync', {
+      p_token: state.token,
+      p_account: data.account,
+      p_matches: data.matches || []
+    });
+    if (error) throw error;
+
+    state.riotAccount = saved?.account || data.account || null;
+    buildRiotStatMaps(saved?.champion_stats || data.champion_stats || [], saved?.matchup_stats || data.matchup_stats || []);
     renderRiotState();
     if (state.lastRecommendations.length) {
       await recommend();
     }
-    const persistNote = data.persisted ? '' : ` 저장은 실패했습니다: ${data.persistError}`;
-    showToast(`최근 ${data.analyzed}게임 전적을 반영했습니다.${persistNote}`, data.persisted ? 'ok' : 'warn');
+    showToast(`최근 ${data.analyzed}게임 전적을 저장하고 반영했습니다.`, 'ok');
   } catch (error) {
     setRiotMessage(error.message, 'bad');
     showToast(error.message, 'bad');

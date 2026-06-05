@@ -445,7 +445,6 @@ const server = http.createServer(async (req, res) => {
       }
       const body = await readJsonBody(req);
       const data = await syncRiotAccount({
-        token: body.token,
         gameName: body.gameName,
         tagLine: body.tagLine,
         platform: body.platform || 'kr',

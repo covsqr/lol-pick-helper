@@ -18,7 +18,6 @@ export default async function handler(req, res) {
   try {
     const body = await readBody(req);
     const data = await syncRiotAccount({
-      token: body.token,
       gameName: body.gameName,
       tagLine: body.tagLine,
       platform: body.platform || 'kr',
