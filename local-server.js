@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { analyzeRiotMatchIds, getRiotMatchSeed } from './lib/riot.js';
+import { callSupabaseRpc } from './lib/supabase-rpc.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(__dirname, 'public');
@@ -456,6 +457,17 @@ const server = http.createServer(async (req, res) => {
             platform: body.platform || 'kr',
             count: body.count || 30
           });
+      json(res, 200, data);
+      return;
+    }
+
+    if (url.pathname === '/api/supabase-rpc') {
+      if (req.method !== 'POST') {
+        json(res, 405, { data: null, error: { message: 'Method not allowed' } });
+        return;
+      }
+      const body = await readJsonBody(req);
+      const data = await callSupabaseRpc(body.fn, body.params || {});
       json(res, 200, data);
       return;
     }

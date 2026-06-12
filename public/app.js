@@ -1,12 +1,9 @@
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-
 const state = {
   meta: null,
   mode: 'blind',
   ddragonVersion: null,
   ddragonByKey: {},
   lastRecommendations: [],
-  supabase: null,
   token: null,
   accountId: null,
   username: null,
@@ -17,8 +14,6 @@ const state = {
   riotMatchupStats: {}
 };
 
-const SUPABASE_URL = 'https://vwcmdowgzptxdhmhahhz.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ3Y21kb3dnenB0eGRobWhhaGh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMTY4NDEsImV4cCI6MjA5NDU5Mjg0MX0.BHb3CCg6sZv_K31VFpbiap0PrxkBTyMsrgWsYAtynfg';
 const API_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 const META_API_CACHE_TTL_MS = 1000 * 60 * 60;
 
@@ -322,7 +317,7 @@ function activeLolpsTier() {
 
 async function saveUserSettings() {
   if (!isLoggedIn()) return;
-  await state.supabase.rpc('app_save_settings', {
+  await supabaseRpc('app_save_settings', {
     p_token: state.token,
     p_default_lane: els.laneSelect.value,
     p_tier: els.ownTierSelect.value
@@ -344,7 +339,7 @@ function syncTierFilter(persist = true) {
 async function savePool() {
   if (isLoggedIn()) {
     const champions = parsePoolText(els.poolInput.value);
-    const { error } = await state.supabase.rpc('app_save_pool', {
+    const { error } = await supabaseRpc('app_save_pool', {
       p_token: state.token,
       p_lane: els.laneSelect.value,
       p_champions: champions
@@ -395,7 +390,7 @@ async function loadAccountData() {
     return;
   }
 
-  const { data, error } = await state.supabase.rpc('app_get_state', {
+  const { data, error } = await supabaseRpc('app_get_state', {
     p_token: state.token
   });
   if (error) {
@@ -430,7 +425,6 @@ async function loadAccountData() {
 }
 
 async function initAuth() {
-  state.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   try {
     const saved = JSON.parse(localStorage.getItem(sessionKey()) || 'null');
     if (saved?.token && saved?.accountId && saved?.username) {
@@ -448,7 +442,7 @@ async function initAuth() {
 async function signUp() {
   try {
     const { username, password } = validateCredentials();
-    const { data, error } = await state.supabase.rpc('app_signup', {
+    const { data, error } = await supabaseRpc('app_signup', {
       p_username: username,
       p_password: password
     });
@@ -475,7 +469,7 @@ async function signUp() {
 async function login() {
   try {
     const { username, password } = validateCredentials();
-    const { data, error } = await state.supabase.rpc('app_login', {
+    const { data, error } = await supabaseRpc('app_login', {
       p_username: username,
       p_password: password
     });
@@ -500,7 +494,7 @@ async function login() {
 
 async function logout() {
   if (state.token) {
-    await state.supabase.rpc('app_logout', { p_token: state.token });
+    await supabaseRpc('app_logout', { p_token: state.token });
   }
   localStorage.removeItem(sessionKey());
   state.token = null;
@@ -519,7 +513,7 @@ async function importLocalPools() {
       const stored = localStorage.getItem(poolKey(lane.key));
       const champions = parsePoolText(stored);
       if (!champions.length) continue;
-      const { error } = await state.supabase.rpc('app_save_pool', {
+      const { error } = await supabaseRpc('app_save_pool', {
         p_token: state.token,
         p_lane: lane.key,
         p_champions: champions
@@ -567,7 +561,7 @@ async function loadRiotState() {
   }
 
   try {
-    const { data, error } = await state.supabase.rpc('app_riot_get_state', {
+    const { data, error } = await supabaseRpc('app_riot_get_state', {
       p_token: state.token
     });
     if (error) throw error;
@@ -624,7 +618,7 @@ async function syncRiotHistory() {
       allMatches.push(...(data.matches || []));
     }
 
-    const { data: saved, error } = await state.supabase.rpc('app_riot_save_sync', {
+    const { data: saved, error } = await supabaseRpc('app_riot_save_sync', {
       p_token: state.token,
       p_account: seed.account,
       p_matches: allMatches
@@ -710,6 +704,36 @@ async function api(path, timeoutMs = 15000) {
     throw error;
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+async function supabaseRpc(fn, params = {}) {
+  try {
+    const response = await fetch('/api/supabase-rpc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fn, params })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        data: null,
+        error: { message: body.error?.message || body.error || 'Supabase 요청에 실패했습니다.' }
+      };
+    }
+    return {
+      data: body.data ?? null,
+      error: body.error ?? null
+    };
+  } catch (error) {
+    return {
+      data: null,
+      error: {
+        message: error.message === 'Failed to fetch'
+          ? '계정 서버 요청에 실패했습니다. 새로고침 후 다시 시도해 주세요.'
+          : error.message
+      }
+    };
   }
 }
 
@@ -1231,7 +1255,7 @@ function renderCard(card) {
 
 async function recordFeedback(championId, result) {
   if (isLoggedIn()) {
-    const { error } = await state.supabase.rpc('app_add_feedback', {
+    const { error } = await supabaseRpc('app_add_feedback', {
       p_token: state.token,
       p_lane: els.laneSelect.value,
       p_champion_id: Number(championId),

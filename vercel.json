@@ -27,6 +27,10 @@
       "dest": "/api/riot-connect.js"
     },
     {
+      "src": "/api/supabase-rpc",
+      "dest": "/api/supabase-rpc.js"
+    },
+    {
       "src": "/favicon.png",
       "dest": "/public/favicon.png"
     },
