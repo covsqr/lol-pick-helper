@@ -1,4 +1,4 @@
-import { syncRiotAccount } from '../lib/riot.js';
+import { analyzeRiotMatchIds, getRiotMatchSeed } from '../lib/riot.js';
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -17,12 +17,18 @@ export default async function handler(req, res) {
 
   try {
     const body = await readBody(req);
-    const data = await syncRiotAccount({
-      gameName: body.gameName,
-      tagLine: body.tagLine,
-      platform: body.platform || 'kr',
-      count: body.count || 30
-    });
+    const data = Array.isArray(body.matchIds)
+      ? await analyzeRiotMatchIds({
+          puuid: body.puuid,
+          platform: body.platform || 'kr',
+          matchIds: body.matchIds
+        })
+      : await getRiotMatchSeed({
+          gameName: body.gameName,
+          tagLine: body.tagLine,
+          platform: body.platform || 'kr',
+          count: body.count || 30
+        });
     res.setHeader('cache-control', 'no-store');
     res.status(200).json(data);
   } catch (error) {

@@ -591,7 +591,7 @@ async function syncRiotHistory() {
   els.riotSyncBtn.disabled = true;
   setRiotMessage('Riot API에서 최근 전적을 분석하는 중입니다.');
   try {
-    const response = await fetch('/api/riot-connect', {
+    const seedResponse = await fetch('/api/riot-connect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -601,26 +601,49 @@ async function syncRiotHistory() {
         count: Number(els.riotMatchCountSelect.value)
       })
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || 'Riot 전적 동기화에 실패했습니다.');
+    const seed = await seedResponse.json().catch(() => ({}));
+    if (!seedResponse.ok) throw new Error(seed.error || 'Riot 계정 조회에 실패했습니다.');
+
+    const chunkSize = 5;
+    const allMatches = [];
+    const matchIds = seed.match_ids || [];
+    for (let index = 0; index < matchIds.length; index += chunkSize) {
+      const chunk = matchIds.slice(index, index + chunkSize);
+      setRiotMessage(`Riot 전적 분석 중입니다. ${Math.min(index + chunk.length, matchIds.length)} / ${matchIds.length}게임`);
+      const response = await fetch('/api/riot-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          puuid: seed.account?.puuid,
+          platform: seed.account?.platform || els.riotPlatformSelect.value,
+          matchIds: chunk
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Riot 매치 분석에 실패했습니다.');
+      allMatches.push(...(data.matches || []));
+    }
 
     const { data: saved, error } = await state.supabase.rpc('app_riot_save_sync', {
       p_token: state.token,
-      p_account: data.account,
-      p_matches: data.matches || []
+      p_account: seed.account,
+      p_matches: allMatches
     });
     if (error) throw error;
 
-    state.riotAccount = saved?.account || data.account || null;
-    buildRiotStatMaps(saved?.champion_stats || data.champion_stats || [], saved?.matchup_stats || data.matchup_stats || []);
+    state.riotAccount = saved?.account || seed.account || null;
+    buildRiotStatMaps(saved?.champion_stats || [], saved?.matchup_stats || []);
     renderRiotState();
     if (state.lastRecommendations.length) {
       await recommend();
     }
-    showToast(`최근 ${data.analyzed}게임 전적을 저장하고 반영했습니다.`, 'ok');
+    showToast(`최근 ${allMatches.length}게임 전적을 저장하고 반영했습니다.`, 'ok');
   } catch (error) {
-    setRiotMessage(error.message, 'bad');
-    showToast(error.message, 'bad');
+    const message = error.message === 'Failed to fetch'
+      ? '네트워크 요청이 중단되었습니다. 잠시 후 다시 시도하거나 최근 게임 수를 줄여 주세요.'
+      : error.message;
+    setRiotMessage(message, 'bad');
+    showToast(message, 'bad');
   } finally {
     els.riotSyncBtn.disabled = false;
   }

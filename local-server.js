@@ -2,7 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { syncRiotAccount } from './lib/riot.js';
+import { analyzeRiotMatchIds, getRiotMatchSeed } from './lib/riot.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(__dirname, 'public');
@@ -444,12 +444,18 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const body = await readJsonBody(req);
-      const data = await syncRiotAccount({
-        gameName: body.gameName,
-        tagLine: body.tagLine,
-        platform: body.platform || 'kr',
-        count: body.count || 30
-      });
+      const data = Array.isArray(body.matchIds)
+        ? await analyzeRiotMatchIds({
+            puuid: body.puuid,
+            platform: body.platform || 'kr',
+            matchIds: body.matchIds
+          })
+        : await getRiotMatchSeed({
+            gameName: body.gameName,
+            tagLine: body.tagLine,
+            platform: body.platform || 'kr',
+            count: body.count || 30
+          });
       json(res, 200, data);
       return;
     }
